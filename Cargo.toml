@@ -1,0 +1,11 @@
+[package]
+name = "photoman2"
+version = "0.1.0"
+authors = ["Leonid Vygovskiy <leonid.vygovskiy@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+kamadak-exif = "0.5.5"
+walkdir = "2.3.2"
