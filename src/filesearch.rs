@@ -25,29 +25,27 @@ enum FolderType {
 
 #[derive(Debug)]
 pub struct SourceFolder {
-   pub path: PathBuf,
+    pub path: PathBuf,
 }
 
 #[derive(Debug)]
 pub struct TargetFolder {
-   pub path: PathBuf,
-   pub date: NaiveDate,
+    pub path: PathBuf,
+    pub date: NaiveDate,
 }
 
 #[derive(Debug)]
 pub struct Folders {
-   pub source: Vec<SourceFolder>,
-   pub target: Vec<TargetFolder>,
+    pub source: Vec<SourceFolder>,
+    pub target: Vec<TargetFolder>,
 }
 
-pub fn find_folders<P>(entry_point: P) -> io::Result<Folders>
+pub fn find_folders<P>(entry_point: &P) -> io::Result<Folders>
 where
     P: AsRef<Path>,
 {
-    let mut result = Folders {
-        source: Vec::new(),
-        target: Vec::new(),
-    };
+    let mut target_folders = Vec::new();
+    let mut source_folders = Vec::new();
 
     for entry in fs::read_dir(entry_point)? {
         let entry = entry?;
@@ -55,12 +53,15 @@ where
         if let Some(path_str) = entry.file_name().to_str() {
             if path.is_dir() {
                 match try_extract_date(path_str) {
-                    Some(date) => result.target.push(TargetFolder { path, date }),
-                    None => result.source.push(SourceFolder { path }),
+                    Some(date) => target_folders.push(TargetFolder { path, date }),
+                    None => source_folders.push(SourceFolder { path }),
                 }
             }
         }
     }
 
-    Ok(result)
+    Ok(Folders {
+        source: source_folders,
+        target: target_folders,
+    })
 }

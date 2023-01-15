@@ -14,19 +14,19 @@ pub enum ImageType {
 }
 
 #[derive(Debug)]
-pub struct ImageInfo {
-    path: PathBuf,
-    date: NaiveDate,
-    camera: String,
+pub(crate) struct ImageInfo {
+   pub path: PathBuf,
+   pub date: NaiveDate,
+   pub camera: String,
 }
 
-pub trait ExifReader {
+pub(crate) trait ExifReader {
     fn load<P>(&self, file_path: P) -> Result<ImageInfo, crate::error::Error>
     where
         P: AsRef<Path>;
 }
 
 
-pub fn create_exif_reader() -> impl ExifReader {
+pub(crate) fn create_exif_reader() -> impl ExifReader {
     RustReader{}
 }
