@@ -2,10 +2,13 @@
 name = "photoman2"
 version = "0.1.0"
 authors = ["Leonid Vygovskiy <leonid.vygovskiy@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+chrono = "0.4.23"
 kamadak-exif = "0.5.5"
+lazy_static = "1.4.0"
+regex = "1.7.1"
 walkdir = "2.3.2"

@@ -1,22 +1,24 @@
 use std::fmt;
 use std::io;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
     ExifError(exif::Error),
     NoFieldError(),
-    WalkDirError()
+    PathNotFile(PathBuf),
+    WalkDirError(),
 }
 
 impl From<exif::Error> for Error {
-    fn from(error : exif::Error) -> Self {
+    fn from(error: exif::Error) -> Self {
         Error::ExifError(error)
     }
 }
 
 impl From<io::Error> for Error {
-    fn from(error : io::Error) -> Self {
+    fn from(error: io::Error) -> Self {
         Error::Io(error)
     }
 }
@@ -27,7 +29,11 @@ impl fmt::Display for Error {
             Error::Io(ref io_err) => io_err.fmt(f),
             Error::ExifError(exif_error) => exif_error.fmt(f),
             Error::NoFieldError() => f.write_str("field not found"),
-            Error::WalkDirError() => f.write_str("cant walk dir")
+            Error::WalkDirError() => f.write_str("cant walk dir"),
+            Error::PathNotFile(p) => f.write_fmt(format_args!(
+                "expected file, not directory ({})",
+                p.as_path().to_string_lossy()
+            )),
         }
     }
 }
@@ -37,10 +43,3 @@ impl std::error::Error for Error {
         None
     }
 }
-
-// unstable API in rustc 1.49.0
-// impl From<NoneError> for Error {
-//     fn from(none: NoneError) -> Self {
-//         Error::NoFieldError()
-//     }
-// }

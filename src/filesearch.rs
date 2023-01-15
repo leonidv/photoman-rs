@@ -1,52 +1,66 @@
-use walkdir::{WalkDir, DirEntry};
-use crate::error::Error;
-use std::fs::File;
-use std::ffi::OsStr;
-use std::collections::HashMap;
+use std::{
+    fs, io,
+    path::{self, Path, PathBuf},
+    sync::Arc,
+};
 
-pub struct FileInfo {
-    path: String,
-    is_raw: bool,
+use chrono::NaiveDate;
+use regex::Regex;
+
+lazy_static! {
+    static ref DATE_PREFIX: Regex = Regex::new(r"^(\d{4}-\d{2}-\d{2}).*").unwrap();
 }
 
-enum FileType {
-    NOT_INTERESTED,
-    DIR,
-    IMAGE,
-    RAW,
-    VIDEO,
+fn try_extract_date(path_str: &str) -> Option<NaiveDate> {
+    let x: Option<regex::Captures> = DATE_PREFIX.captures_iter(path_str).next();
+    return x.map(
+        |c| NaiveDate::parse_from_str(&c[1], "%Y-%m-%d").unwrap(), // impossible error
+    );
 }
 
-const IMAGE_EXTENSIONS: [&str; 2] = ["JPG", "JPEG"];
-
-const RAW_EXTENSIONS: [&str; 2] = ["PEF", "ARW"];
-
-const map: HashMap<&str, FileType> =
-    [
-        ("JPG", FileType::IMAGE),
-        ("JPEG", FileType::IMAGE),
-        ("PEF", FileType::RAW),
-        ("ARW", FileType::RAW),
-        ("MOV", FileType::VIDEO)
-    ].iter().cloned().collect();
-
-
-pub fn find_images(path: String) -> Vec<FileInfo> {}
-
-fn get_file_type(dir_entry: &DirEntry) -> Result<FileType, Error> {
-    if dir_entry.metadata()?.is_dir() {
-        return Ok(FileType::DIR);
-    } else {
-        let x =
-            dir_entry.path().extension()
-                .map(|ext| extension_to_file_type(ext))
-                .ok_or(Err(Error::WalkDirError()))?;
-        return x;
-    }
+enum FolderType {
+    WithDate(),
+    ToSort(),
 }
 
-fn extension_to_file_type(ext: &OsStr) -> Result<FileType, Error> {
-    return match ext.to_str() {
-        Some()
+#[derive(Debug)]
+pub struct SourceFolder {
+   pub path: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct TargetFolder {
+   pub path: PathBuf,
+   pub date: NaiveDate,
+}
+
+#[derive(Debug)]
+pub struct Folders {
+   pub source: Vec<SourceFolder>,
+   pub target: Vec<TargetFolder>,
+}
+
+pub fn find_folders<P>(entry_point: P) -> io::Result<Folders>
+where
+    P: AsRef<Path>,
+{
+    let mut result = Folders {
+        source: Vec::new(),
+        target: Vec::new(),
     };
+
+    for entry in fs::read_dir(entry_point)? {
+        let entry = entry?;
+        let path = entry.path();
+        if let Some(path_str) = entry.file_name().to_str() {
+            if path.is_dir() {
+                match try_extract_date(path_str) {
+                    Some(date) => result.target.push(TargetFolder { path, date }),
+                    None => result.source.push(SourceFolder { path }),
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }
