@@ -1,7 +1,7 @@
 use std::{
     fs, io,
-    path::{self, Path, PathBuf},
-    sync::Arc,
+    path::{Path, PathBuf},
+    collections::HashMap,
 };
 
 use chrono::NaiveDate;
@@ -18,33 +18,23 @@ fn try_extract_date(path_str: &str) -> Option<NaiveDate> {
     );
 }
 
-enum FolderType {
-    WithDate(),
-    ToSort(),
+#[derive(Debug,Clone, Copy, Hash, PartialEq, Eq)]
+pub(crate) enum TargetType {
+    IMAGE(NaiveDate),
+    RAW(NaiveDate),
 }
 
 #[derive(Debug)]
-pub struct SourceFolder {
-    pub path: PathBuf,
+pub(crate) struct Folders {
+    pub source: Vec<PathBuf>,
+    pub target: HashMap<TargetType,PathBuf>,
 }
 
-#[derive(Debug)]
-pub struct TargetFolder {
-    pub path: PathBuf,
-    pub date: NaiveDate,
-}
-
-#[derive(Debug)]
-pub struct Folders {
-    pub source: Vec<SourceFolder>,
-    pub target: Vec<TargetFolder>,
-}
-
-pub fn find_folders<P>(entry_point: &P) -> io::Result<Folders>
+pub(crate) fn find_folders<P>(entry_point: &P, raw_folder: &str) -> io::Result<Folders>
 where
     P: AsRef<Path>,
 {
-    let mut target_folders = Vec::new();
+    let mut target_folders = HashMap::<TargetType,PathBuf>::new();
     let mut source_folders = Vec::new();
 
     for entry in fs::read_dir(entry_point)? {
@@ -53,8 +43,14 @@ where
         if let Some(path_str) = entry.file_name().to_str() {
             if path.is_dir() {
                 match try_extract_date(path_str) {
-                    Some(date) => target_folders.push(TargetFolder { path, date }),
-                    None => source_folders.push(SourceFolder { path }),
+                    Some(date) => {
+                         target_folders.insert(TargetType::IMAGE(date), path.to_path_buf());
+                         let raw_folder = path.join(raw_folder);
+                         if raw_folder.is_dir() {
+                            target_folders.insert(TargetType::RAW(date), path.to_path_buf());
+                         }
+                    },
+                    None => source_folders.push(path),
                 }
             }
         }

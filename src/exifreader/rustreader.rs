@@ -1,16 +1,16 @@
 use std::{fs::File, io::BufReader};
 
 use crate::error::Error;
-use crate::exifreader::ImageInfo;
+use crate::exifreader::ExifData;
 
 use super::ExifReader;
 use chrono::NaiveDate;
-use exif::{Exif, Field, In, Tag};
+use exif::{Exif, In, Tag};
 
 pub struct RustReader;
 
 impl ExifReader for RustReader {
-    fn load<P>(&self, file_path: P) -> Result<ImageInfo, Error>
+    fn load<P>(&self, file_path: P) -> Result<ExifData, Error>
     where
         P: AsRef<std::path::Path> {
             let file = File::open(file_path.as_ref())?;
@@ -27,8 +27,7 @@ impl ExifReader for RustReader {
             let f_date = f_datetime.split_once(' ').unwrap().0;
             
 
-            Ok(ImageInfo {
-                path: file_path.as_ref().to_path_buf(),
+            Ok(ExifData {
                 date: NaiveDate::parse_from_str(f_date, "%Y-%m-%d").unwrap(),
                 camera: f_camera,
             })

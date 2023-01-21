@@ -1,47 +1,41 @@
 #[macro_use]
 extern crate lazy_static;
 
-use imageinfo::ImageInfo;
+use std::path::PathBuf;
 
-use filesearch::{find_folders};
+use clap::Parser;
 
-use crate::exifreader::{ExifReader, create_exif_reader};
+use crate::exifreader::{create_exif_reader};
 use crate::manager::Manager;
 
-mod imageinfo;
+
 mod error;
+mod exifreader;
 mod filesearch;
 mod manager;
-mod exifreader;
 
-fn main() {
-    let mut exif_reader = create_exif_reader();    
-
-    let image_info = exif_reader.load("test_data/images/01.jpg").unwrap();
-
-    println!("{:?}", image_info);
-
-    let folders = filesearch::find_folders(&"test_data/").unwrap();
-    println!("Target folders");
-    for folder in &folders.target {
-        println!("{:?}", folder);
-    }
-
-
-    println!("Source folders");
-    for folder in folders.source {
-        println!("{:?}", folder);
-    }
-
-    println!("{}","═".repeat(40));
-
-    let _manager = Manager::new("test_data/", true);
-    match _manager {
-        Ok(mut manager) => manager.arrange_files(&exif_reader),
-        Err(e) => eprintln!("{}",e),
-    }
-    
-
-   // manager::arrange_files(&folders.target, &folders.source, &exif_reader);
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// working directory, default = current directory
+    #[arg(default_value=".")]
+    work_dir: PathBuf,
+    /// output command without execution
+    #[arg(long, action = clap::ArgAction::SetTrue, default_value="false")]
+    dry_run: bool    
 }
 
+fn main() {
+    let args = Args::parse();
+
+    let exif_reader = create_exif_reader();
+
+    let mut manager = Manager::new()
+        .work_dir(args.work_dir);
+    if args.dry_run {
+        manager = manager.dry_run();
+    }    
+    manager.arrange_files(&exif_reader);
+
+    // manager::arrange_files(&folders.target, &folders.source, &exif_reader);
+}

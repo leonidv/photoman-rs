@@ -1,13 +1,15 @@
 [package]
-name = "photoman2"
+name = "photoman"
 version = "0.1.0"
 authors = ["Leonid Vygovskiy <leonid.vygovskiy@gmail.com>"]
+description = "Arrange media files by date and type"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 chrono = "0.4.23"
+clap = { version = "4.1.1", features = ["derive","cargo"] }
 kamadak-exif = "0.5.5"
 lazy_static = "1.4.0"
 regex = "1.7.1"

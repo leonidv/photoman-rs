@@ -1,14 +1,19 @@
 use std::fmt;
 use std::io;
-use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
     ExifError(exif::Error),
     NoFieldError(),
-    PathNotFile(PathBuf),
-    WalkDirError(),
+   // PathNotFile(PathBuf),
+   // WalkDirError(),
+}
+
+impl Error {
+    pub(crate) fn log<P : AsRef<std::path::Path>>(&self, path : P) {
+        eprintln!("Can't process [{}], error: {}", path.as_ref().to_string_lossy(), self)
+    }
 }
 
 impl From<exif::Error> for Error {
@@ -29,11 +34,11 @@ impl fmt::Display for Error {
             Error::Io(ref io_err) => io_err.fmt(f),
             Error::ExifError(exif_error) => exif_error.fmt(f),
             Error::NoFieldError() => f.write_str("field not found"),
-            Error::WalkDirError() => f.write_str("cant walk dir"),
-            Error::PathNotFile(p) => f.write_fmt(format_args!(
-                "expected file, not directory ({})",
-                p.as_path().to_string_lossy()
-            )),
+            // Error::WalkDirError() => f.write_str("cant walk dir"),
+            // Error::PathNotFile(p) => f.write_fmt(format_args!(
+            //     "expected file, not directory ({})",
+            //     p.as_path().to_string_lossy()
+            // )),
         }
     }
 }
