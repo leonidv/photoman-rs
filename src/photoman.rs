@@ -1,18 +1,14 @@
-#[macro_use]
-extern crate lazy_static;
+
 
 use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::exifreader::{create_exif_reader};
-use crate::manager::Manager;
+use photoman::Manager;
 
 
-mod error;
-mod exifreader;
-mod filesearch;
-mod manager;
+
+
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -28,14 +24,12 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let exif_reader = create_exif_reader();
 
     let mut manager = Manager::new()
         .work_dir(args.work_dir);
     if args.dry_run {
         manager = manager.dry_run();
-    }    
-    manager.arrange_files(&exif_reader);
+    }   
+    manager.arrange_files();
 
-    // manager::arrange_files(&folders.target, &folders.source, &exif_reader);
 }

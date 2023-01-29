@@ -1,14 +1,21 @@
+#[macro_use]
+extern crate lazy_static;
+
+mod error;
+mod exifreader;
+mod filesearch;
+mod iocommands;
+
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
 
-use chrono::NaiveDate;
-
 use crate::{
     error::Error,
-    exifreader::{ExifData, ExifReader},
+    exifreader::{create_exif_reader, ExifData, ExifReader},
     filesearch::{find_folders, TargetType},
+    iocommands::*,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,54 +49,13 @@ struct FileInfo {
 }
 
 #[derive(Debug)]
-pub(crate) struct Manager {
+pub struct Manager {
     work_dir: PathBuf,
+    use_exiftool: bool,
     separate_raw: bool,
     raw_exts: Vec<String>,
     raw_folder: String,
     dry_run: bool,
-}
-
-#[derive(Debug)]
-struct MoveFile {
-    from: PathBuf,
-    to: PathBuf,
-}
-
-#[derive(Debug)]
-struct MkDir {
-    target: PathBuf,
-}
-
-trait IOCommand {
-    fn exec(&self, dry_run: bool) -> Result<(), Error>;
-}
-
-impl IOCommand for MoveFile {
-    fn exec(&self, dry_run: bool) -> Result<(), Error> {
-        if dry_run {
-            let from = &self.from;
-            let to = &self.to;
-            println!("{} ➙ {}", from.to_string_lossy(), to.to_string_lossy());
-            Ok(())
-        } else {
-            todo!()
-        }
-    }
-}
-
-impl IOCommand for MkDir {
-    fn exec(&self, dry_run: bool) -> Result<(), Error> {
-        if dry_run {
-            println!(
-                "create new directory: {}",
-                self.target.as_path().to_string_lossy()
-            );
-            Ok(())
-        } else {
-            todo!()
-        }
-    }
 }
 
 struct FileProcessCommands {
@@ -120,14 +86,18 @@ impl FileProcessCommands {
 }
 
 // https://fileinfo.com/filetypes/camera_raw
-const RAW_EXTENSIONS : &'static str = include_str!("../resources/raw_extensions");
+const RAW_EXTENSIONS: &'static str = include_str!("../resources/raw_extensions");
 
 impl Manager {
-    pub(crate) fn new() -> Manager {
-        let raw_exts = RAW_EXTENSIONS.lines().map(|l| l.to_ascii_lowercase().to_string()).collect();
+    pub fn new() -> Manager {
+        let raw_exts = RAW_EXTENSIONS
+            .lines()
+            .map(|l| l.to_ascii_lowercase().to_string())
+            .collect();
 
         Manager {
             work_dir: PathBuf::from("."),
+            use_exiftool: false,
             separate_raw: true,
             raw_folder: "raw".to_string(),
             raw_exts,
@@ -135,29 +105,31 @@ impl Manager {
         }
     }
 
-    pub(crate) fn work_dir<P: AsRef<Path>>(self, value: P) -> Manager {
+    pub fn work_dir<P: AsRef<Path>>(self, value: P) -> Manager {
         Manager {
             work_dir: value.as_ref().to_path_buf(),
             ..self
         }
     }
 
-    pub(crate) fn dry_run(self) -> Manager {
+    pub fn dry_run(self) -> Manager {
         Manager {
             dry_run: true,
             ..self
         }
     }
 
-    pub(crate) fn dont_separate_raw(self) -> Manager {
+    pub fn dont_separate_raw(self) -> Manager {
         Manager {
             separate_raw: false,
             ..self
         }
     }
 
-    pub(crate) fn arrange_files(&mut self, exif_reader: &impl ExifReader) {
+    pub fn arrange_files(&mut self) {
         println!("{:?}", self);
+
+        let exif_reader = create_exif_reader();
 
         let folders = find_folders(&self.work_dir, &self.raw_folder).unwrap();
         let sources = folders.source;
@@ -167,9 +139,9 @@ impl Manager {
         let mut mkdir_commands = Vec::<MkDir>::new();
         let mut move_commands = Vec::<MoveFile>::new();
 
-        for source in sources {
+        for source in &sources {
             let process_result =
-                self.process_source_folder(&source, &mut targets_per_date, exif_reader);
+                self.process_source_folder(&source, &mut targets_per_date, &exif_reader);
             match process_result {
                 Ok(source_commands) => {
                     for sc in source_commands {
@@ -195,12 +167,22 @@ impl Manager {
         for move_file in move_commands {
             move_file.exec(self.dry_run).unwrap()
         }
+
+        for source in &sources {
+            let cmd = RmEmptyDir {
+                target: source.to_path_buf(),
+            };
+            match cmd.exec(self.dry_run) {
+                Ok(_) => println!("Removed empty directory {}", source.to_string_lossy()),
+                Err(e) => println!("{}",e),
+            }
+        }
     }
 
     fn process_source_folder(
         &mut self,
         source: &PathBuf,
-        targets_per_date: &mut HashMap<TargetType,PathBuf>,
+        targets_per_date: &mut HashMap<TargetType, PathBuf>,
         exif_reader: &impl ExifReader,
     ) -> Result<Vec<FileProcessCommands>, Error> {
         println!(
@@ -214,10 +196,10 @@ impl Manager {
             let entry = _entry?;
             let process_result = if entry.metadata()?.is_file() {
                 let path = entry.path();
-                match exif_reader.load(path.to_path_buf()) {
+                match exif_reader.read(path.to_path_buf()) {
                     Ok(exif_data) => {
-                        let f_type =
-                            FileType::try_from_path(path.to_path_buf(), &self.raw_exts).unwrap_or(FileType::IMAGE);
+                        let f_type = FileType::try_from_path(path.to_path_buf(), &self.raw_exts)
+                            .unwrap_or(FileType::IMAGE);
 
                         let image_info = FileInfo {
                             exif: exif_data,
@@ -272,7 +254,7 @@ impl Manager {
         };
 
         let mut possible_mk_dir: Option<MkDir> = None;
-        let date_dir = folder_per_date.entry(target_key).or_insert_with(|| {            
+        let date_dir = folder_per_date.entry(target_key).or_insert_with(|| {
             let date = exif.date.format("%Y-%m-%d").to_string();
             let date_folder = self.work_dir.clone().join(date);
             let target = if put_in_raw_folder {
@@ -290,11 +272,17 @@ impl Manager {
 
         // === still reoder in folders with dates not supported
         // === should be implemented by self.move_in_targets or something like
-        
-        let move_file = MoveFile {
-            from: image_path.to_path_buf(),
-            to: date_dir.clone().join(image_name),
-        };
-        Ok(FileProcessCommands::new(move_file, possible_mk_dir))
+
+        // should not overwrite an existing file
+        let target_filename = date_dir.join(image_name);
+        if !target_filename.exists() {
+            let move_file = MoveFile {
+                from: image_path.to_path_buf(),
+                to: target_filename,
+            };
+            Ok(FileProcessCommands::new(move_file, possible_mk_dir))
+        } else {
+            Ok(FileProcessCommands::new_empty())
+        }
     }
 }

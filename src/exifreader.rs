@@ -14,7 +14,7 @@ pub(crate) struct ExifData {
 }
 
 pub(crate) trait ExifReader {
-    fn load<P>(&self, file_path: P) -> Result<ExifData, crate::error::Error>
+    fn read<P>(&self, file_path: P) -> Result<ExifData, crate::error::Error>
     where
         P: AsRef<Path>;
 }

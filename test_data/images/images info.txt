@@ -1,0 +1,5 @@
+01.jpg - 2020-06-21, Russia, Saint-Petersburg
+02.jpg - 2022-10-02, Russia, Saint-Petersburg, Pushkin
+03.jpg - 2022-10-02, Russia, Saint-Petersburg, Pushkin
+
+02.raw is just renames 01.jpg

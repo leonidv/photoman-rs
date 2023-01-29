@@ -10,7 +10,7 @@ use exif::{Exif, In, Tag};
 pub struct RustReader;
 
 impl ExifReader for RustReader {
-    fn load<P>(&self, file_path: P) -> Result<ExifData, Error>
+    fn read<P>(&self, file_path: P) -> Result<ExifData, Error>
     where
         P: AsRef<std::path::Path> {
             let file = File::open(file_path.as_ref())?;
@@ -40,5 +40,19 @@ fn get_field_or_error(exif: &Exif, tag: Tag) -> Result<String, Error> {
     match o_field {
         Some(field) => Ok(field.display_value().to_string()),
         None => Err(Error::NoFieldError()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_from_jpeg() {
+        let reader = RustReader{};
+        let maybe_exif = reader.read("test_data/images/01.jpg");
+        assert!(maybe_exif.is_ok());
+        let exif = maybe_exif.unwrap();
+        assert_eq!(exif.date, NaiveDate::from_ymd_opt(2020, 06, 21).unwrap()); 
     }
 }
