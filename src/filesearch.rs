@@ -7,6 +7,7 @@ use std::{
 use chrono::NaiveDate;
 use regex::Regex;
 
+
 lazy_static! {
     static ref DATE_PREFIX: Regex = Regex::new(r"^(\d{4}-\d{2}-\d{2}).*").unwrap();
 }
@@ -37,11 +38,13 @@ where
     let mut target_folders = HashMap::<TargetType,PathBuf>::new();
     let mut source_folders = Vec::new();
 
+
     for entry in fs::read_dir(entry_point)? {
         let entry = entry?;
         let path = entry.path();
         if let Some(path_str) = entry.file_name().to_str() {
             if path.is_dir() {
+                tracing::debug!(folder=path_str);
                 match try_extract_date(path_str) {
                     Some(date) => {
                          target_folders.insert(TargetType::IMAGE(date), path.to_path_buf());

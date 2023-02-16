@@ -1,8 +1,6 @@
 
 extern crate chrono;
-
-use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::{fs};
 
 use photoman::Manager;
 use spectral::assert_that;

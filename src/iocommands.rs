@@ -1,4 +1,5 @@
 use std::{fs, path::PathBuf};
+use tracing::{info};
 
 use crate::error::Error;
 
@@ -26,7 +27,7 @@ impl IOCommand for MoveFile {
         if dry_run {
             let from = &self.from;
             let to = &self.to;
-            println!("{} ➙ {}", from.to_string_lossy(), to.to_string_lossy());
+            info!("{} ➙ {}", from.to_string_lossy(), to.to_string_lossy());
             Ok(())
         } else {
             fs::rename(&self.from, &self.to).map_err(Error::from)
@@ -37,7 +38,7 @@ impl IOCommand for MoveFile {
 impl IOCommand for MkDir {
     fn exec(&self, dry_run: bool) -> Result<(), Error> {
         if dry_run {
-            println!(
+            info!(
                 "create new directory: {}",
                 self.target.as_path().to_string_lossy()
             );

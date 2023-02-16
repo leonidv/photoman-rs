@@ -1,5 +1,11 @@
 01.jpg - 2020-06-21, Russia, Saint-Petersburg
 02.jpg - 2022-10-02, Russia, Saint-Petersburg, Pushkin
 03.jpg - 2022-10-02, Russia, Saint-Petersburg, Pushkin
+000000581894.jpg  2021-04-22, from unlabeled2017 dataset with custom DateTimeOriginal
 
-02.raw is just renames 01.jpg
+02.raw is just renamed 01.jpg
+
+
+Performance suite:
+https://www.kaggle.com/datasets/starktony45/image-dataset
+http://images.cocodataset.org/zips/unlabeled2017.zip 123 401 files

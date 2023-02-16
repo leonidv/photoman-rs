@@ -5,10 +5,12 @@ mod error;
 mod exifreader;
 mod filesearch;
 mod iocommands;
+mod progress;
 
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    fs::DirEntry,
+    path::{Path, PathBuf}
 };
 
 use crate::{
@@ -17,6 +19,8 @@ use crate::{
     filesearch::{find_folders, TargetType},
     iocommands::*,
 };
+
+use tracing::{debug, debug_span, info, span, trace, warn, Level};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
@@ -51,11 +55,13 @@ struct FileInfo {
 #[derive(Debug)]
 pub struct Manager {
     work_dir: PathBuf,
+
+    #[allow(dead_code)]
     use_exiftool: bool,
     separate_raw: bool,
-    raw_exts: Vec<String>,
     raw_folder: String,
     dry_run: bool,
+    raw_exts: Vec<String>,
 }
 
 struct FileProcessCommands {
@@ -126,12 +132,19 @@ impl Manager {
         }
     }
 
+    #[tracing::instrument(skip(self), level=Level::DEBUG)]
     pub fn arrange_files(&mut self) {
-        println!("{:?}", self);
+        tracing::debug!(?self);
 
         let exif_reader = create_exif_reader();
 
-        let folders = find_folders(&self.work_dir, &self.raw_folder).unwrap();
+        // let span = span!(Level::DEBUG, "find_folders").entered();
+        // let folders = find_folders(&self.work_dir, &self.raw_folder).unwrap();
+        // span.exit();
+
+        let folders = span!(Level::DEBUG, "find_folders")
+            .in_scope(|| find_folders(&self.work_dir, &self.raw_folder).unwrap());
+
         let sources = folders.source;
 
         let mut targets_per_date = folders.target;
@@ -139,7 +152,10 @@ impl Manager {
         let mut mkdir_commands = Vec::<MkDir>::new();
         let mut move_commands = Vec::<MoveFile>::new();
 
-        for source in &sources {
+        let span = debug_span!("make_commands").entered();
+        let progress_indicator =
+            progress::ProgressIndicator::new(sources.len(), "process source".to_string());
+        for (i, source) in sources.iter().enumerate() {
             let process_result =
                 self.process_source_folder(&source, &mut targets_per_date, &exif_reader);
             match process_result {
@@ -149,51 +165,76 @@ impl Manager {
                         move_commands.extend(sc.move_file);
                     }
                 }
-                Err(e) => eprintln!(
+                Err(e) => warn!(
                     "can't process [{}], error: {}]",
                     source.to_string_lossy(),
                     e
                 ),
             };
+
+            progress_indicator.step_info(i + 1);
         }
 
-        println!("will create {} dirs", mkdir_commands.len());
-        println!("will move {} images", move_commands.len());
+        span.exit();
 
-        for mkdir in mkdir_commands {
-            mkdir.exec(self.dry_run).unwrap()
-        }
+        debug!("will create {} dirs", mkdir_commands.len());
+        debug!("will move {} images", move_commands.len());
 
-        for move_file in move_commands {
-            move_file.exec(self.dry_run).unwrap()
-        }
+        debug_span!("mkdir").in_scope(|| {
+            for mkdir in mkdir_commands {
+                mkdir.exec(self.dry_run).unwrap()
+            }
+        });
+
+        let total_images_move = move_commands.len();
+        let progress_indicator =
+            progress::ProgressIndicator::new(total_images_move, "moved images ".to_string());
+        debug_span!("move images").in_scope(|| {
+            for (i, move_file) in move_commands.iter().enumerate() {
+                move_file.exec(self.dry_run).unwrap();
+                progress_indicator.step_info(i + 1);
+            }
+        });
 
         for source in &sources {
             let cmd = RmEmptyDir {
                 target: source.to_path_buf(),
             };
             match cmd.exec(self.dry_run) {
-                Ok(_) => println!("Removed empty directory {}", source.to_string_lossy()),
-                Err(e) => println!("{}",e),
+                Ok(_) => info!("Removed empty directory {}", source.to_string_lossy()),
+                Err(e) => warn!("{}", e),
             }
         }
     }
 
+    #[tracing::instrument(skip_all, level=Level::TRACE )]
     fn process_source_folder(
         &mut self,
         source: &PathBuf,
         targets_per_date: &mut HashMap<TargetType, PathBuf>,
         exif_reader: &impl ExifReader,
     ) -> Result<Vec<FileProcessCommands>, Error> {
-        println!(
+        let dir_name = source.as_path().to_string_lossy().to_string();
+        trace!(
             "process source folder {}",
             source.as_path().to_string_lossy()
         );
 
         let mut commands = Vec::new();
 
+        let span = debug_span!("getting list of files", folder = dir_name).entered();
+        let mut files_in_folder = Vec::<DirEntry>::new();
         for _entry in source.read_dir()? {
-            let entry = _entry?;
+            files_in_folder.push(_entry?);
+        }
+        span.exit();
+
+        let progress_indicator = progress::ProgressIndicator::new(
+            files_in_folder.len(),
+            format!("process {}: ", dir_name),
+        );
+
+        for (i,entry) in files_in_folder.iter().enumerate() {
             let process_result = if entry.metadata()?.is_file() {
                 let path = entry.path();
                 match exif_reader.read(path.to_path_buf()) {
@@ -209,7 +250,10 @@ impl Manager {
 
                         self.make_commands_to_process_image(targets_per_date, &image_info)
                     }
-                    Err(e) => Err(e),
+                    Err(e) => {
+                         warn!("can't read exif from {}", path.to_string_lossy());
+                         Err(e)
+                    }
                 }
             } else {
                 Ok(FileProcessCommands::new_empty())
@@ -227,11 +271,13 @@ impl Manager {
                     }
                 }
             }
+
+            progress_indicator.step_info(i+1);
         }
 
         return Ok(commands);
     }
-
+    
     fn make_commands_to_process_image(
         &mut self,
         folder_per_date: &mut HashMap<TargetType, PathBuf>,

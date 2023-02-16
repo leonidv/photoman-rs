@@ -9,8 +9,7 @@ mod rustreader;
 
 #[derive(Debug,Clone)]
 pub(crate) struct ExifData {
-   pub date: NaiveDate,
-   pub camera: String,
+   pub date: NaiveDate
 }
 
 pub(crate) trait ExifReader {
