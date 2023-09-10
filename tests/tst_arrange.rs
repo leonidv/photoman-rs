@@ -34,7 +34,7 @@ pub fn standard_execution() {
         assert_that(&test_dir.join("IMGP2011").join("02.JPG")).exists();
         assert_that(&test_dir.join("IMGP1011")).does_not_exist();
 
-        fs::remove_dir_all(&test_dir).unwrap();
+        //fs::remove_dir_all(&test_dir).unwrap();
     }
 
 }

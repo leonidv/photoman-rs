@@ -1,6 +1,6 @@
 [package]
 name = "photoman"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Leonid Vygovskiy <leonid.vygovskiy@gmail.com>"]
 description = "Arranges media files by date and type"
 edition = "2021"
@@ -9,10 +9,16 @@ edition = "2021"
 
 [dependencies]
 chrono = "0.4.23"
-clap = { version = "4.1.1", features = ["derive","cargo"] }
-kamadak-exif = "0.5.5"
-lazy_static = "1.4.0"
 regex = "1.7.1"
+kamadak-exif = "0.5.5"
+
+clap = { version = "4.1.1", features = ["derive","cargo"] }
+
+lazy_static = "1.4.0"
+
+rayon = "1.6.1"
+dashmap = "5.5.3"
+
 tracing = "0.1.37"
 tracing-subscriber = {version = "0.3.16",  features = ["registry", "env-filter"] }     
 

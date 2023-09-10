@@ -1,10 +1,11 @@
 use lazy_static::lazy_static;
+use tracing::Dispatch;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 use std::{
     fs, io,
     path::{Path, PathBuf},
 };
-
 
 lazy_static! {
     static ref EXECUTION_TIMESTAMP: String = chrono::Local::now()
@@ -16,6 +17,17 @@ lazy_static! {
 ///
 /// Return test's working folder. Test can free modify content of this folder.
 pub fn prepare_suite(test_name: &str) -> Result<PathBuf, io::Error> {
+   let subscriber =  tracing_subscriber::FmtSubscriber::builder()
+        .log_internal_errors(true)
+        .compact()
+        .with_env_filter(EnvFilter::from_env("PHOTOMAN_LOG"))
+        .with_span_events(FmtSpan::CLOSE)
+        .with_target(false)
+        .with_ansi(true)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber);
+
     let test_dir = std::env::temp_dir()
         .join(EXECUTION_TIMESTAMP.as_str())
         .join(test_name);

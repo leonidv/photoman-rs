@@ -3,7 +3,7 @@
 03.jpg - 2022-10-02, Russia, Saint-Petersburg, Pushkin
 000000581894.jpg  2021-04-22, from unlabeled2017 dataset with custom DateTimeOriginal
 
-02.raw is just renamed 01.jpg
+01.raw is just renamed 01.jpg
 
 
 Performance suite:

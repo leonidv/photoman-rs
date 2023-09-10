@@ -8,9 +8,11 @@ mod iocommands;
 mod progress;
 
 use std::{
-    collections::HashMap,
     fs::DirEntry,
-    path::{Path, PathBuf}
+    io,
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::{Arc, RwLock},
 };
 
 use crate::{
@@ -20,6 +22,8 @@ use crate::{
     iocommands::*,
 };
 
+use dashmap::DashMap;
+use rayon::prelude::*;
 use tracing::{debug, debug_span, info, span, trace, warn, Level};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +34,11 @@ pub enum FileType {
 }
 
 impl FileType {
+    /**
+     * Detect type of file - image, raw, movie.
+     *
+     * Return None if path does not contain extension.
+     */
     fn try_from_path<P: AsRef<Path>>(path: P, raw_exts: &Vec<String>) -> Option<FileType> {
         path.as_ref().extension().map(|ext| {
             let ext = ext.to_ascii_lowercase();
@@ -64,25 +73,25 @@ pub struct Manager {
     raw_exts: Vec<String>,
 }
 
-struct FileProcessCommands {
+struct FileProcessing {
     move_file: Option<MoveFile>,
-    possible_mk_dir: Option<MkDir>,
+    mk_dir: Option<MkDir>,
 }
 
-impl FileProcessCommands {
-    const EMPTY_FILE_COMMANDS: FileProcessCommands = FileProcessCommands {
+impl FileProcessing {
+    const EMPTY_FILE_COMMANDS: FileProcessing = FileProcessing {
         move_file: None,
-        possible_mk_dir: None,
+        mk_dir: None,
     };
 
-    fn new_empty() -> FileProcessCommands {
-        FileProcessCommands::EMPTY_FILE_COMMANDS
+    fn new_empty() -> FileProcessing {
+        FileProcessing::EMPTY_FILE_COMMANDS
     }
 
-    fn new(move_file: MoveFile, possible_mk_dir: Option<MkDir>) -> FileProcessCommands {
-        FileProcessCommands {
+    fn new(move_file: MoveFile, possible_mk_dir: Option<MkDir>) -> FileProcessing {
+        FileProcessing {
             move_file: Some(move_file),
-            possible_mk_dir,
+            mk_dir: possible_mk_dir,
         }
     }
 
@@ -93,6 +102,8 @@ impl FileProcessCommands {
 
 // https://fileinfo.com/filetypes/camera_raw
 const RAW_EXTENSIONS: &'static str = include_str!("../resources/raw_extensions");
+
+unsafe impl Sync for Manager {}
 
 impl Manager {
     pub fn new() -> Manager {
@@ -138,30 +149,30 @@ impl Manager {
 
         let exif_reader = create_exif_reader();
 
-        // let span = span!(Level::DEBUG, "find_folders").entered();
-        // let folders = find_folders(&self.work_dir, &self.raw_folder).unwrap();
-        // span.exit();
-
-        let folders = span!(Level::DEBUG, "find_folders")
-            .in_scope(|| find_folders(&self.work_dir, &self.raw_folder).unwrap());
+        // !!! PERFORMANCE: find_folders
+        let span = span!(Level::DEBUG, "find_folders").entered();
+        let folders = find_folders(&self.work_dir, &self.raw_folder).unwrap();
+        span.exit();
 
         let sources = folders.source;
 
-        let mut targets_per_date = folders.target;
+        let targets_per_date = Arc::new(folders.target);
 
         let mut mkdir_commands = Vec::<MkDir>::new();
         let mut move_commands = Vec::<MoveFile>::new();
 
+        // !!! PERFORMANCE: make commands
         let span = debug_span!("make_commands").entered();
         let progress_indicator =
-            progress::ProgressIndicator::new(sources.len(), "process source".to_string());
-        for (i, source) in sources.iter().enumerate() {
+            progress::ProgressIndicator::new(sources.len(), "read metadata from folders".to_string());
+
+        for source in sources.iter() {
             let process_result =
-                self.process_source_folder(&source, &mut targets_per_date, &exif_reader);
+                self.prepare_commands_for_folder(&source, &targets_per_date, &exif_reader);
             match process_result {
                 Ok(source_commands) => {
                     for sc in source_commands {
-                        mkdir_commands.extend(sc.possible_mk_dir); // implicity unlift option
+                        mkdir_commands.extend(sc.mk_dir); // implicity unlift option
                         move_commands.extend(sc.move_file);
                     }
                 }
@@ -172,7 +183,7 @@ impl Manager {
                 ),
             };
 
-            progress_indicator.step_info(i + 1);
+            progress_indicator.step();
         }
 
         span.exit();
@@ -180,115 +191,153 @@ impl Manager {
         debug!("will create {} dirs", mkdir_commands.len());
         debug!("will move {} images", move_commands.len());
 
-        debug_span!("mkdir").in_scope(|| {
-            for mkdir in mkdir_commands {
-                mkdir.exec(self.dry_run).unwrap()
-            }
-        });
+        // !!! PERFORMANCE: make directories
+        let span = debug_span!("mkdir").entered();
+        for mkdir in mkdir_commands {
+            mkdir.exec(self.dry_run).unwrap()
+        }
+        span.exit();
 
+        // !!! PERFORMANCE: move files
         let total_images_move = move_commands.len();
         let progress_indicator =
-            progress::ProgressIndicator::new(total_images_move, "moved images ".to_string());
-        debug_span!("move images").in_scope(|| {
-            for (i, move_file) in move_commands.iter().enumerate() {
-                move_file.exec(self.dry_run).unwrap();
-                progress_indicator.step_info(i + 1);
-            }
+            progress::ProgressIndicator::new(total_images_move, "moving images ".to_string());
+        let span = debug_span!("move images").entered();
+
+        // lv try par
+        move_commands.par_iter().for_each(|move_file| {
+            move_file.exec(self.dry_run).unwrap();
+            progress_indicator.step();
         });
+
+        span.exit();
 
         for source in &sources {
             let cmd = RmEmptyDir {
                 target: source.to_path_buf(),
             };
+            
+               
+
             match cmd.exec(self.dry_run) {
-                Ok(_) => info!("Removed empty directory {}", source.to_string_lossy()),
-                Err(e) => warn!("{}", e),
+                Ok(_) => info!("Removed empty folder {}", source.to_string_lossy()),
+                Err(e) => warn!("Can't remove folder {}, error {}", source.to_string_lossy(),  e),
             }
         }
     }
 
-    #[tracing::instrument(skip_all, level=Level::TRACE )]
-    fn process_source_folder(
-        &mut self,
-        source: &PathBuf,
-        targets_per_date: &mut HashMap<TargetType, PathBuf>,
-        exif_reader: &impl ExifReader,
-    ) -> Result<Vec<FileProcessCommands>, Error> {
-        let dir_name = source.as_path().to_string_lossy().to_string();
-        trace!(
-            "process source folder {}",
-            source.as_path().to_string_lossy()
-        );
+    // show warning and return None
+    fn warn_io_error<T, S, P>(operation: S, e: Error, path: P) -> Option<T>
+    where
+        S: AsRef<str>,
+        P: AsRef<Path>,
+    {
+        match e {
+            Error::Io(io_err) => {
+                let os_error: String = io_err
+                    .raw_os_error()
+                    .map_or("".to_string(), |code| format!(", os error: {}", code)); // ugly code
+                warn!(
+                    "{}, path [{}], e = {}, os_error = {}",
+                    operation.as_ref(),
+                    path.as_ref().to_string_lossy(),
+                    io_err,
+                    os_error
+                )
+            }
+            _ => warn!(
+                "{}, path [{}], e = {}",
+                operation.as_ref(),
+                path.as_ref().to_string_lossy(),
+                e
+            ),
+        }
+        None
+    }
 
-        let mut commands = Vec::new();
+    #[tracing::instrument(skip_all, level=Level::TRACE )]
+    fn prepare_commands_for_folder(
+        &mut self,
+        source_folder: &PathBuf,
+        targets_per_date: &Arc<DashMap<TargetType, PathBuf>>,
+        exif_reader: &impl ExifReader,
+    ) -> Result<Vec<FileProcessing>, Error> {
+        let dir_name = source_folder.as_path().to_string_lossy().to_string();
+        trace!(
+            "read EXIF from images in {}",
+            source_folder.as_path().to_string_lossy()
+        );
 
         let span = debug_span!("getting list of files", folder = dir_name).entered();
         let mut files_in_folder = Vec::<DirEntry>::new();
-        for _entry in source.read_dir()? {
+        for _entry in source_folder.read_dir()? {
             files_in_folder.push(_entry?);
         }
         span.exit();
 
         let progress_indicator = progress::ProgressIndicator::new(
             files_in_folder.len(),
-            format!("process {}: ", dir_name),
+            format!("read from images in folder {}: ", dir_name),
         );
 
-        for (i,entry) in files_in_folder.iter().enumerate() {
-            let process_result = if entry.metadata()?.is_file() {
-                let path = entry.path();
-                match exif_reader.read(path.to_path_buf()) {
-                    Ok(exif_data) => {
-                        let f_type = FileType::try_from_path(path.to_path_buf(), &self.raw_exts)
-                            .unwrap_or(FileType::IMAGE);
-
-                        let image_info = FileInfo {
-                            exif: exif_data,
-                            path: path.to_path_buf(),
-                            f_type,
-                        };
-
-                        self.make_commands_to_process_image(targets_per_date, &image_info)
-                    }
-                    Err(e) => {
-                         warn!("can't read exif from {}", path.to_string_lossy());
-                         Err(e)
+        let x = files_in_folder
+            .par_iter()
+            .filter_map(|dir_entry| match dir_entry.metadata() {
+                Ok(metadata) => {
+                    if metadata.is_file() {
+                        Some(dir_entry)
+                    } else {
+                        None
                     }
                 }
-            } else {
-                Ok(FileProcessCommands::new_empty())
-            };
 
-            match process_result {
-                Ok(file_commands) => {
-                    if !file_commands.is_empty() {
-                        commands.push(file_commands)
-                    }
-                }
                 Err(e) => {
-                    if let Error::Io(_) = e {
-                        e.log(entry.path().to_path_buf());
-                    }
+                    Self::warn_io_error("Can't read metadata", Error::Io(e), dir_entry.path())
                 }
-            }
+            })
+            .filter_map(|dir_entry| {
+                FileType::try_from_path(dir_entry.path(), &self.raw_exts)
+                    .map(|file_type| (dir_entry, file_type))
+            })
+            .filter_map(
+                |(dir_entry, file_type)| match exif_reader.read(dir_entry.path()) {
+                    Ok(exif_data) => Some(FileInfo {
+                        exif: exif_data,
+                        path: dir_entry.path(),
+                        f_type: file_type,
+                    }),
 
-            progress_indicator.step_info(i+1);
-        }
+                    Err(e) => Self::warn_io_error("Can't read EXIF", e, dir_entry.path()),
+                },
+            )
+            .filter_map(|file_info| {
+                let r = match self.make_commands_to_process_image(targets_per_date, &file_info) {
+                    Ok(commands) => Some(commands),
+                    Err(e) => Self::warn_io_error("Can't prepare commands", e, file_info.path),
+                };
+                progress_indicator.step();
+                r
+            });
 
-        return Ok(commands);
+        let v: Vec<FileProcessing> = x.collect();
+
+
+        return Ok(v);
     }
-    
+
+    // Analyze image and make required commands. One image may require moving file and creating
+    // new directory
     fn make_commands_to_process_image(
-        &mut self,
-        folder_per_date: &mut HashMap<TargetType, PathBuf>,
+        &self,
+        folder_per_date: &Arc<DashMap<TargetType, PathBuf>>,
         file_info: &FileInfo,
-    ) -> Result<FileProcessCommands, Error> {
+    ) -> Result<FileProcessing, Error> {
         let image_path = &file_info.path;
         let exif = &file_info.exif;
 
         let image_name = match image_path.file_name() {
             Some(image_name) => image_name,
-            None => return Ok(FileProcessCommands::new_empty()), // file_name == .. , do nothing
+            None => return Ok(FileProcessing::new_empty()), // file_name == .. , do nothing
         };
 
         let put_in_raw_folder = file_info.f_type == FileType::RAW && self.separate_raw;
@@ -326,9 +375,9 @@ impl Manager {
                 from: image_path.to_path_buf(),
                 to: target_filename,
             };
-            Ok(FileProcessCommands::new(move_file, possible_mk_dir))
+            Ok(FileProcessing::new(move_file, possible_mk_dir))
         } else {
-            Ok(FileProcessCommands::new_empty())
+            Ok(FileProcessing::new_empty())
         }
     }
 }

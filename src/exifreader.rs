@@ -12,7 +12,7 @@ pub(crate) struct ExifData {
    pub date: NaiveDate
 }
 
-pub(crate) trait ExifReader {
+pub(crate) trait ExifReader : Sync {
     fn read<P>(&self, file_path: P) -> Result<ExifData, crate::error::Error>
     where
         P: AsRef<Path>;

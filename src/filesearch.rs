@@ -5,6 +5,7 @@ use std::{
 };
 
 use chrono::NaiveDate;
+use dashmap::DashMap;
 use regex::Regex;
 
 
@@ -28,14 +29,14 @@ pub(crate) enum TargetType {
 #[derive(Debug)]
 pub(crate) struct Folders {
     pub source: Vec<PathBuf>,
-    pub target: HashMap<TargetType,PathBuf>,
+    pub target: DashMap<TargetType,PathBuf>,
 }
 
 pub(crate) fn find_folders<P>(entry_point: &P, raw_folder: &str) -> io::Result<Folders>
 where
     P: AsRef<Path>,
 {
-    let mut target_folders = HashMap::<TargetType,PathBuf>::new();
+    let mut target_folders = DashMap::<TargetType,PathBuf>::new();
     let mut source_folders = Vec::new();
 
 
